@@ -1,5 +1,5 @@
 //By ligongzzz.
-//Version 2019.07.07
+//Version 2019.07.08
 #include <iostream>
 #include <fstream>
 #include <cstdio>
@@ -8,9 +8,10 @@
 #include <utility>
 #include <map>
 #include <unordered_map>
+#include <vector>
 
 #define RISCV_RELEASE
-#define NO_SHOW_ACCURACY
+#define SHOW_ACCURACY
 
 //Waiting Parameters
 const uint32_t JALR_WAITING_TIME = 4u;
@@ -88,9 +89,9 @@ class LEADER {
 	uint32_t remain_time = 0;
 	bool BAD_ESTIMATE = false;
 	//To calculate the rate.
-	uint32_t right_cnt = 0, total_cnt = 0;
+	uint32_t right_cnt = 0, bad_cnt = 0, total_cnt = 0;
 	//To store the history of branch.
-	std::unordered_map<uint32_t, uint8_t> history;
+	std::unordered_map<uint32_t, std::pair<uint8_t, std::vector<uint8_t>>> history;
 public:
 	bool able_to_fetch() {
 		return remain_time == 0;
@@ -100,29 +101,42 @@ public:
 	}
 	void set_bad_flag(const RUN_DATA& run_data) {
 		BAD_ESTIMATE = true;
+		++bad_cnt;
+
 		//2-Bits Estimate.
 		auto iter = history.find(run_data.pc);
-		if (iter->second == 0b00)
-			iter->second = 0b01;
-		else if (iter->second == 0b01)
-			iter->second = 0b10;
-		else if (iter->second == 0b10)
-			iter->second = 0b01;
+		auto mode = iter->second.first & 0b111;
+		if (iter->second.second[mode] == 0b00)
+			iter->second.second[mode] = 0b01;
+		else if (iter->second.second[mode] == 0b01)
+			iter->second.second[mode] = 0b10;
+		else if (iter->second.second[mode] == 0b10)
+			iter->second.second[mode] = 0b01;
 		else
-			iter->second = 0b10;
+			iter->second.second[mode] = 0b10;
+		if (run_data.tmp)
+			iter->second.first = ((iter->second.first) << 1) + 1;
+		else
+			iter->second.first = (iter->second.first) << 1;
 	}
 	void estimate_success(const RUN_DATA& run_data) {
 		++right_cnt;
+
 		//2-Bits Estimate.
 		auto iter = history.find(run_data.pc);
-		if (iter->second == 0b00)
-			iter->second = 0b00;
-		else if (iter->second == 0b01)
-			iter->second = 0b00;
-		else if (iter->second == 0b10)
-			iter->second = 0b11;
+		auto mode = iter->second.first & 0b111;
+		if (iter->second.second[mode] == 0b00)
+			iter->second.second[mode] = 0b00;
+		else if (iter->second.second[mode] == 0b01)
+			iter->second.second[mode] = 0b00;
+		else if (iter->second.second[mode] == 0b10)
+			iter->second.second[mode] = 0b11;
 		else
-			iter->second = 0b11;
+			iter->second.second[mode] = 0b11;
+		if (run_data.tmp)
+			iter->second.first = (iter->second.first << 1) + 1;
+		else
+			iter->second.first = iter->second.first << 1;
 	}
 	bool able_to_continue() {
 		bool return_val = !BAD_ESTIMATE;
@@ -147,20 +161,19 @@ public:
 		auto iter = history.find(run_data.pc);
 		if (iter == history.end()) {
 			if (int32_t(run_data.imm) < 0) {
-				history.insert(std::make_pair(run_data.pc, 0b11));
+				history.insert(std::make_pair(run_data.pc, std::make_pair(uint8_t(0), std::vector<uint8_t>(8, 0))));
 				return true;
 			}
 			else {
-				history.insert(std::make_pair(run_data.pc, 0b00));
+				uint8_t null_data[0b100] = { 0 };
+				history.insert(std::make_pair(run_data.pc, std::make_pair(uint8_t(0), std::vector<uint8_t>(8, 0))));
 				return false;
 			}
-			history.insert(std::make_pair(run_data.pc, 0b11));
-			return true;
 		}
-		return iter->second >= 0b10;
+		return iter->second.second[iter->second.first & 0b111] >= 0b10;
 	}
 	double accuracy_query() {
-		return double(right_cnt) / double(total_cnt);
+		return double(right_cnt) / (double(right_cnt) + double(bad_cnt));
 	}
 };
 LEADER leader;
