@@ -11,7 +11,7 @@
 #include <vector>
 
 #define RISCV_RELEASE
-#define SHOW_ACCURACY
+#define NO_SHOW_ACCURACY
 
 //Waiting Parameters
 const uint32_t JALR_WAITING_TIME = 4u;
